@@ -23,7 +23,7 @@ modified: 22/03/17
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
+//#include <math.h>
 #include <sys/stat.h>
 #define N_PRINT
 
@@ -51,53 +51,56 @@ void print_vector(double *sh, double **R, int l) {
 struct pmct{
 	int Nt,Ntexp,Nt2,Nc,rpt,den,itr;	//Nt: #(grid elements), Ntexp: log2(Nt), rpt, Nt2: Nt/2, Nsh: #(short-grid elements), den: Nt/Nsh , itr: #(cycles)
 	double t,Cmin,t0,eps,alpha;
+	double p,s_eps,s,T,beta;		//p: (p+s)-spin, s_eps: weight of s-interaction, s: (p+s)-spin, T: temperature, beta: inverse temperature of the initial equilibrium
 };
 
 struct parr{							//see appendix C
-	double R,dt,dmu;
+	double dt,dmu;
 	double *mu,*E;
-	double **C,**Q,**f1,**f2;
-	double **dCh,**dQh,**df1h,**df2h;
-	double **dCv,**dQv,**df1v,**df2v;
+	double **C,**R,**f1,**f2R;
+	double **dCh,**dRh,**df1h,**df2Rh;
+	double **dCv,**dRv,**df1v,**df2Rv;
 };
 
 struct psys{
 	char file[100],dir[100];			//file and directory name
-	double p,s_eps,s,T,beta;			//p: (p+s)-spin, s_eps: weight of s-interaction, s: (p+s)-spin, T: temperature, beta: inverse temperature of the initial equilibrium
 	double *sh,*sh2;
 };
 
-struct t_CQ{
-	double time;
-	double C;
-	double Q;
-};
-
+/**************************GeNeRaL****************************/
 void mct(struct pmct z,struct parr *px,struct psys w);
-void initialarray(struct pmct z,struct parr *px,struct psys w);
-void contract(struct pmct z,struct parr *px,double *dt,double *dmu);
+void initialarray(struct pmct z,struct parr *px);
 int step(int i,struct pmct z,struct parr *px,struct psys w);
+/**************************GrIdMaNiPuLaTiOn****************************/
+void contract(struct pmct z,struct parr *px,double *dt,double *dmu);
+void Ih(struct parr *px, int i, int j);
+void Iv(struct parr *px, int i, int j);
+void Mirroring(struct parr *px, int i, int j);
+void Extrapolation(struct parr *px, int i, int j);
 /**************************SeLf-CoNsIsTeNcE****************************/
-double SC2(double *gC,double *gQ,double D,double mu,struct pmct z,struct parr x,struct psys w,int i,int j);
+double SC2(double *gC,double *gR,double D,double mu,struct pmct z,struct parr x,int i,int j);
+double If2RR(struct pmct z,struct parr x,int i,int j);
+double If2RC(struct pmct z,struct parr x,int i,int j);
+double If1R(struct pmct z,struct parr x,int i,int j);
 double I1C(struct parr x,int i,int j,int m);
 double I2C(struct parr x,int i,int j,int m);
 double I3C(struct parr x,int i,int j);
 double I4C(struct parr x,int i,int j);
-double I1Q(struct parr x,int i,int j,int m);
-double I2Q(struct parr x,int i,int j,int m);
+double I1R(struct parr x,int i,int j,int m);
+double I2R(struct parr x,int i,int j,int m);
 double power(double x,int p);
-double f(double x,struct psys w);
-double fd1(double x,struct psys w);
-double fd2(double x,struct psys w);
-double mu_t(struct pmct z,struct parr x,struct psys w,int i);
-double E_t(struct pmct z,struct parr x,struct psys w,int i);
+double f(double x,struct pmct z);
+double f1(double x,struct pmct z);
+double f2(double x,struct pmct z);
+double mu_t(struct pmct z,struct parr x,int i);
+double E_t(struct pmct z,struct parr x,int i);
 /**************************ArRay****************************/
 void array_initialization(struct pmct z,struct parr *px);
 /**************************PaRaMeTeRs****************************/
-void parameters_initialization(struct pmct *pz,struct parr *px, struct psys *pw, char *argv[]);
+void parameters_initialization(struct pmct *pz,struct parr *px,struct psys *pw,char *argv[]);
 /**************************ScReEn****************************/
 void save_config(struct pmct z,struct parr x,struct psys w);
-void open_config(struct pmct *pz,struct parr *px,struct psys *pw, char *dir);
+void open_config(struct pmct *pz,struct parr *px,struct psys *pw,char *dir);
 /**************************OuTpUt****************************/
 void write_parameters(struct pmct z,struct parr x,struct psys w);
 void write_C_0(struct parr x,struct psys w,int ini,int ifi);
@@ -134,8 +137,8 @@ int main(int argc, char *argv[]){
 
 	/*run*/
 	printf("\n-----------------------------------------------------START-------------------------------------------------------\n");
-	printf("------SYSTEM: (%d+eps*%d)-spin glass, eps = %2.3f------------------------------------------------------------------\n",(int)w.p,(int)w.s,w.s_eps);
-	printf("------PARAMETERS: T = %1.3f, T' = %1.3f, grid dimension = %d (Nsh = %d), initial time window = %.2e-----\n",w.T,1./w.beta,z.Nt,z.Nc,z.t0);
+	printf("------SYSTEM: (%d+eps*%d)-spin glass, eps = %2.3f------------------------------------------------------------------\n",(int)z.p,(int)z.s,z.s_eps);
+	printf("------PARAMETERS: T = %1.3f, T' = %1.3f, grid dimension = %d (Nsh = %d), initial time window = %.2e-----\n",z.T,1./z.beta,z.Nt,z.Nc,z.t0);
 	printf("-----------------------------------------------------------------------------------------------------------------\n\n");
 	mct(z,&x,w);
 	printf("\n-------------------------------------------------------END-------------------------------------------------------\n");
@@ -144,6 +147,7 @@ int main(int argc, char *argv[]){
 }
 
 
+/**************************GeNeRaL****************************/
 
 void mct(struct pmct z,struct parr *px,struct psys w){
 
@@ -160,24 +164,24 @@ void mct(struct pmct z,struct parr *px,struct psys w){
 
 	itr=0;
 
-	initialarray(z,px,w); 	// prepare the array btwn 0 <= i,j <= Nt/2
+	initialarray(z,px); 	// prepare the array btwn 0 <= i,j <= Nt/2
 
 	write_C_0(*px,w,0,z.Nt2);
 	write_C(z,*px,w,1);
 
 	#ifndef N_PRINT
 		print_vector(w.sh,px->C,z.Nt);		//PRINT
-		print_vector(w.sh2,px->Q,z.Nt);		//PRINT
+		print_vector(w.sh2,px->R,z.Nt);		//PRINT
 	#endif
 
-	while(itr <= z.itr){
+	while(itr < z.itr){
 
-		if(scMAX>10) { save_config(z,*px,w); }
+		//if(scMAX>10) { save_config(z,*px,w); }
 
 		scMAX = 0;
-		for(i=z.Nt2+1;i<=z.Nt;i++){
+		for(i=z.Nt2;i<z.Nt;i++){
 /*------------------------------------------------------------*/
-			scmaxx[i]=step(i,z,px,w);	// propagate the solution the array btwn Nt/2 <= i,j <= Nt
+			scmaxx[i+1]=step(i+1,z,px,w);	// propagate the solution the array btwn Nt/2 <= i,j <= Nt
 			if(scmaxx[i]>scMAX) { scMAX = scmaxx[i]; i_scMAX = i; }
 /*------------------------------------------------------------*/
 		}
@@ -187,7 +191,7 @@ void mct(struct pmct z,struct parr *px,struct psys w){
 
 	#ifndef N_PRINT
 		print_vector(w.sh,px->C,z.Nt);		//PRINT
-		print_vector(w.sh2,px->Q,z.Nt);		//PRINT
+		print_vector(w.sh2,px->R,z.Nt);		//PRINT
 	#endif
 
 /*------------------------------------------------------------*/
@@ -202,217 +206,298 @@ void mct(struct pmct z,struct parr *px,struct psys w){
 	}
 }
 
-void initialarray(struct pmct z,struct parr *px,struct psys w){
-
-/*
-	px->C[0][0]=1;  px->Q[0][0]=0;
-	mu[0]=T+Bp*f1(1.);
-	for(i=0;i<=z.Nt2;i++){
-		if(i%100==0)printf("%d\n",i);
-		px->Q[i][i]=0; px->C[i][i]=1;
-		for(j=0;j<=i;j++){
-			px->Q[i+1][j]=px->Q[i][j]+h*(-mu[i]*R[i][j]+If2RR(i,j));
-			px->Q[j][i+1]=px->Q[i+1][j];
-			px->C[i+1][j]=px->C[i][j]+h*(-mu[i]*C[i][j]+If2RC(i,j)+If1R(i,j)+Bp*df1(px->C[i][0])*px->C[j][0]);
-			px->C[j][i+1]=px->C[i+1][j];
-	}
-	//px->Q[i+1][i]=1;
-	//px->Q[i][i+1]=px->Q[i+1][i];
-	//px->C[i+1][i+1]=1;
-	px->mu[i+1]=If1R(i+1,i+1)+If2RC(i+1,i+1)+T+Bp*df1(px->C[i+1][0])*px->C[i+1][0]; // Questa e' la prescrizione migliore per mu
-
-	double ene=-Bp*f(px->C[i][0])-If1R(i,i);
-	fprintf(f11,"%f %f %f %f\n",i*h,mu[i],C[i][0],ene);
-	}
-*/
+void initialarray(struct pmct z,struct parr *px){
 
 	int i,j;
 
-	for(i=0;i<=z.Nt2;i++){
-		px->mu[i] = 0.0;
-		for(j=0;j<=i;j++){
-			px->C[i][j]= 1.0 - (double)(i-j)*px->dt*w.T;	// very short time expansion --> time homogeneous initial C
-			px->Q[i][j]= 0.0;							// very short time expansion --> FDT initially respected (Q=0)
-			px->f1[i][j]= fd1(px->C[i][j],w);
-			px->f2[i][j]= fd2(px->C[i][j],w);
-		}
-	}
-	for(i=1;i<=z.Nt2;i++){
-		for(j=0;j<i;j++){
-			px->dCh[i][j]= 0.5*(px->C[i-1][j]+px->C[i][j]);
-			px->dQh[i][j]= 0.5*(px->Q[i-1][j]+px->Q[i][j]);
-			px->df1h[i][j]= 0.5*(px->f1[i-1][j]+px->f1[i][j]);
-			px->df2h[i][j]= 0.5*(px->f2[i-1][j]+px->f2[i][j]);
-			px->dCv[i][j]= 0.5*(px->C[i][j+1]+px->C[i][j]);
-			px->dQv[i][j]= 0.5*(px->Q[i][j+1]+px->Q[i][j]);
-			px->df1v[i][j]= 0.5*(px->f1[i][j+1]+px->f1[i][j]);
-			px->df2v[i][j]= 0.5*(px->f2[i][j+1]+px->f2[i][j]);
-		}
-	}
+	px->C[0][0]=1;
+	px->R[0][0]=0; 
+	px->mu[0]=z.T+z.beta*f1(1.,z);
 
+	for(i=0;i<z.Nt2;i++){
+
+		for(j=i;j>=0;j--){
+
+			px->C[i+1][j] = px->C[i][j]+px->dt*(-px->mu[i]*px->C[i][j]+If2RC(z,*px,i,j)+If1R(z,*px,i,j)+z.beta*f1(px->C[i][0],z)*px->C[j][0]);
+			px->R[i+1][j] = px->R[i][j]+px->dt*(-px->mu[i]*px->R[i][j]+If2RR(z,*px,i,j));
+			px->f1[i+1][j] = f1(px->C[i+1][j],z);
+			px->f2R[i+1][j] = f2(px->C[i+1][j],z)*px->R[i+1][j];
+
+			Ih(px,i+1,j);
+			Iv(px,i+1,j);
+
+			Mirroring(px,i+1,j);
+		}
+
+		px->R[i+1][i]=1;					//THIS PASSAGE IS FUNDAMENTAL FOR THE STABILITY
+		px->f2R[i+1][i] = f2(px->C[i+1][i],z)*px->R[i+1][i];	//
+		Ih(px,i+1,i);						//
+		Iv(px,i+1,i);						//
+		Mirroring(px,i+1,i);					//
+
+		px->mu[i+1]=If1R(z,*px,i+1,i+1)+If2RC(z,*px,i+1,i+1)+z.T+z.beta*f1(px->C[i+1][0],z)*px->C[i+1][0]; // Questa e' la prescrizione migliore per mu
+		px->E[i+1]=-z.beta*f(px->C[i+1][0],z)-If1R(z,*px,i+1,i+1);
+
+		px->C[i+1][i+1]=1;
+		px->R[i][i]=0;
+	}
 }
 
 int step(int i,struct pmct z,struct parr *px,struct psys w){
-	int j,scmax;
-	double D,err,err_temp;
-	double *gC,*gQ;
+	int j,scmax=0;
+	double D,err2=1.0,err_temp2;
+
+	double *gC,*gR;
 	gC = (double *) calloc ((z.Nt),sizeof(double));
-	gQ = (double *) calloc ((z.Nt),sizeof(double));
+	gR = (double *) calloc ((z.Nt),sizeof(double));
 
-	// (1) copy the value for the top Nsh from the previous column
+	// (1) First extrapolation to begin the self-consistence loop
 	px->mu[i] = (D1+1.)*px->mu[i-1]+D2*px->mu[i-2]+D3*px->mu[i-3];
+	Extrapolation(px,i,j);
 
-	for(j=3;j<=i;j++){
-		px->C[i][j]= (D1+1.)*px->C[i-1][j-1]+D2*px->C[i-2][j-2]+D3*px->C[i-3][j-3];
-		px->Q[i][j]= (D1+1.)*px->Q[i-1][j-1]+D2*px->Q[i-2][j-2]+D3*px->Q[i-3][j-3];
-		px->f1[i][j]= (D1+1.)*px->f1[i-1][j-1]+D2*px->f1[i-2][j-2]+D3*px->f1[i-3][j-3];
-		px->f2[i][j]= (D1+1.)*px->f2[i-1][j-1]+D2*px->f2[i-2][j-2]+D3*px->f2[i-3][j-3];
-		px->dCh[i][j]= (D1+1.)*px->dCh[i-1][j-1]+D2*px->dCh[i-2][j-2]+D3*px->dCh[i-3][j-3];
-		px->dQh[i][j]= (D1+1.)*px->dQh[i-1][j-1]+D2*px->dQh[i-2][j-2]+D3*px->dQh[i-3][j-3];
-		px->df1h[i][j]= (D1+1.)*px->df1h[i-1][j-1]+D2*px->df1h[i-2][j-2]+D3*px->df1h[i-3][j-3];
-		px->df2h[i][j]= (D1+1.)*px->df2h[i-1][j-1]+D2*px->df2h[i-2][j-2]+D3*px->df2h[i-3][j-3];
-		px->dCv[i][j]= (D1+1.)*px->dCv[i-1][j-1]+D2*px->dCv[i-2][j-2]+D3*px->dCv[i-3][j-3];
-		px->dQv[i][j]= (D1+1.)*px->dQv[i-1][j-1]+D2*px->dQv[i-2][j-2]+D3*px->dQv[i-3][j-3];
-		px->df1v[i][j]= (D1+1.)*px->df1v[i-1][j-1]+D2*px->df1v[i-2][j-2]+D3*px->df1v[i-3][j-3];
-		px->df2v[i][j]= (D1+1.)*px->df2v[i-1][j-1]+D2*px->df2v[i-2][j-2]+D3*px->df2v[i-3][j-3];
-	}
-
-	j=2;
-		px->C[i][j]= 2.*px->C[i-1][j-1]-px->C[i-2][j-2];
-		px->Q[i][j]= 2.*px->Q[i-1][j-1]-px->Q[i-2][j-2];
-		px->f1[i][j]= 2.*px->f1[i-1][j-1]-px->f1[i-2][j-2];
-		px->f2[i][j]= 2.*px->f2[i-1][j-1]-px->f2[i-2][j-2];
-		px->dCh[i][j]= 2.*px->dCh[i-1][j-1]-px->dCh[i-2][j-2];
-		px->dQh[i][j]= 2.*px->dQh[i-1][j-1]-px->dQh[i-2][j-2];
-		px->df1h[i][j]= 2.*px->df1h[i-1][j-1]-px->df1h[i-2][j-2];
-		px->df2h[i][j]= 2.*px->df2h[i-1][j-1]-px->df2h[i-2][j-2];
-		px->dCv[i][j]= 2.*px->dCv[i-1][j-1]-px->dCv[i-2][j-2];
-		px->dQv[i][j]= 2.*px->dQv[i-1][j-1]-px->dQv[i-2][j-2];
-		px->df1v[i][j]= 2.*px->df1v[i-1][j-1]-px->df1v[i-2][j-2];
-		px->df2v[i][j]= 2.*px->df2v[i-1][j-1]-px->df2v[i-2][j-2];
-	j=1;
-		px->C[i][j]= px->C[i-1][j-1];
-		px->Q[i][j]= px->Q[i-1][j-1];
-		px->f1[i][j]= px->f1[i-1][j-1];
-		px->f2[i][j]= px->f2[i-1][j-1];
-		px->dCh[i][j]= px->dCh[i-1][j-1];
-		px->dQh[i][j]= px->dQh[i-1][j-1];
-		px->df1h[i][j]= px->df1h[i-1][j-1];
-		px->df2h[i][j]= px->df2h[i-1][j-1];
-		px->dCv[i][j]= px->dCv[i-1][j-1];
-		px->dQv[i][j]= px->dQv[i-1][j-1];
-		px->df1v[i][j]= px->df1v[i-1][j-1];
-		px->df2v[i][j]= px->df2v[i-1][j-1];
-	j=0;
-		px->C[i][j]= 2.*px->C[i-1][0]-px->C[i-2][0];
-		px->Q[i][j]= 2.*px->Q[i-1][0]-px->Q[i-2][0];
-		px->f1[i][j]= 2.*px->f1[i-1][0]-px->f1[i-2][0];
-		px->f2[i][j]= 2.*px->f2[i-1][0]-px->f2[i-2][0];
-		px->dCh[i][j]= 2.*px->dCh[i-1][0]-px->dCh[i-2][0];
-		px->dQh[i][j]= 2.*px->dQh[i-1][0]-px->dQh[i-2][0];
-		px->df1h[i][j]= 2.*px->df1h[i-1][0]-px->df1h[i-2][0];
-		px->df2h[i][j]= 2.*px->df2h[i-1][0]-px->df2h[i-2][0];
-		px->dCv[i][j]= 2.*px->dCv[i-1][0]-px->dCv[i-2][0];
-		px->dQv[i][j]= 2.*px->dQv[i-1][0]-px->dQv[i-2][0];
-		px->df1v[i][j]= 2.*px->df1v[i-1][0]-px->df1v[i-2][0];
-		px->df2v[i][j]= 2.*px->df2v[i-1][0]-px->df2v[i-2][0];
-
-
-  // (2) Prepare test values
-	/*for(j=0;j<=i-z.Nc-1;j++){
-		px->C[i][j]= px->C[i-1][j];
-		px->Q[i][j]= px->Q[i-1][j];
-		px->f1[i][j]= fd1(px->C[i][j],w);
-		px->f2[i][j]= fd2(px->C[i][j],w);
-	}
-	for(j=0;j<=i-z.Nc-1;j++){
-		px->dCh[i][j] = (-1.*px->C[i-2][j]+8.*px->C[i-1][j]+5.*px->C[i][j])/12.;
-		px->dQh[i][j] = (-1.*px->Q[i-2][j]+8.*px->Q[i-1][j]+5.*px->Q[i][j])/12.;
-		px->df1h[i][j]=(-1.*px->f1[i-2][j]+8.*px->f1[i-1][j]+5.*px->f1[i][j])/12.;
-		px->df2h[i][j]=(-1.*px->f2[i-2][j]+8.*px->f2[i-1][j]+5.*px->f2[i][j])/12.;
-		px->dCv[i][j] = (-1.*px->C[i][j+2]+8.*px->C[i][j+1]+5.*px->C[i][j])/12.;
-		px->dQv[i][j] = (-1.*px->Q[i][j+2]+8.*px->Q[i][j+1]+5.*px->Q[i][j])/12.;
-		px->df1v[i][j]=(-1.*px->f1[i][j+2]+8.*px->f1[i][j+1]+5.*px->f1[i][j])/12.;
-		px->df2v[i][j]=(-1.*px->f2[i][j+2]+8.*px->f2[i][j+1]+5.*px->f2[i][j])/12.;
-	}*/
-
-	// (3) Go to the SC (self-consistence) loop
-	scmax = 0;
-	err =1.0; 
-
+	// (2) Go to the SC (self-consistence) loop
 	j=1;
 
-	while( err >= z.eps && scmax < z.rpt){
-	err =0.0;
+	while(err2 >= z.eps*z.eps && scmax < z.rpt){
 
 	//****** PART ----> j<i-1
+		while(j>=0){
 
-	while(j>=0){
+			D = D1*px->dt + px->mu[i] + px->df1v[i][i-1]/z.T;
 
-		D = 1.5/px->dt  + px->mu[i] + px->df1v[i][i-1]/w.T;
+			err_temp2 = SC2(gC,gR,D,px->mu[i],z,*px,i,j);
+			if (err_temp2>err2) { err2=err_temp2; }
 
-		err_temp = SC2(gC,gQ,D,px->mu[i],z,*px,w,i,j);
-		if (err_temp>err) { err=err_temp; }
-		// renew all variable
-		px->C[i][j]+= gC[j]*z.alpha;
-		px->Q[i][j]+= gQ[j]*z.alpha;
-		//if(x->C[i][j] >= z.Cmin) x->Q[i][j]+= gQ[j];
-		//else { x->C[i][j] = 0.0; }
-		px->f1[i][j] = fd1(px->C[i][j],w);
-		px->f2[i][j] = fd2(px->C[i][j],w);
+			// renew all variable
+			px->C[i][j]+= gC[j]*z.alpha;
+			px->R[i][j]+= gR[j]*z.alpha;
+			px->f1[i][j] = f1(px->C[i][j],z);
+			px->f2R[i][j] = f2(px->C[i][j],z)*px->R[i][j];
 
-		px->dCh[i][j]=(-1.*px->C[i-2][j]+8.*px->C[i-1][j]+5.*px->C[i][j])/12.;
-		px->dQh[i][j]=(-1.*px->Q[i-2][j]+8.*px->Q[i-1][j]+5.*px->Q[i][j])/12.;
-		px->df1h[i][j]=(-1.*px->f1[i-2][j]+8.*px->f1[i-1][j]+5.*px->f1[i][j])/12.;
-		px->df2h[i][j]=(-1.*px->f2[i-2][j]+8.*px->f2[i-1][j]+5.*px->f2[i][j])/12.;
-		px->dCv[i][j]= (-1.*px->C[i][j+2]+8.*px->C[i][j+1]+5.*px->C[i][j])/12.;
-		px->dQv[i][j]= (-1.*px->Q[i][j+2]+8.*px->Q[i][j+1]+5.*px->Q[i][j])/12.;
-		px->df1v[i][j]= (-1.*px->f1[i][j+2]+8.*px->f1[i][j+1]+5.*px->f1[i][j])/12.;
-		px->df2v[i][j]= (-1.*px->f2[i][j+2]+8.*px->f2[i][j+1]+5.*px->f2[i][j])/12.;
+			Ih(px,i,j);
+			Iv(px,i,j);
 
-		px->mu[i] = mu_t(z,*px,w,i);
+			Mirroring(px,i,j);
 
-		j--;
+			j--;
+		}
+
+		px->mu[i] = mu_t(z,*px,i);
+		scmax++;
+		if(scmax%10==0) { printf("\r%d/%d %d\r",j,i,scmax); fflush(stdout); }
+		j=i-z.Nc;
 	}
 
-	scmax++;
-	if(scmax%10==0) { printf("\r%d/%d %d\r",j,i,scmax); fflush(stdout); }
-	j=i-z.Nc;
-		
-	}
-
-	px->E[i] = E_t(z,*px,w,i);
+	px->E[i] = E_t(z,*px,i);
 
 	free(gC);
-	free(gQ);
+	free(gR);
+
 	return scmax;
+}
+
+/**************************GrIdMaNiPuLaTiOn****************************/
+
+void contract(struct pmct z,struct parr *x,double *dt,double *dmu){
+	int i,j;
+	double Dl;
+	i=z.Nt;
+	for(j=z.Nt-z.Nc*2+1;j<=z.Nt-z.Nc;j++){
+		Dl=(x->R[i][j]-x->R[i][j-1])*(I3*(x->f1[i][j+1]+x->f2R[i][j+1]*x->C[i][j+1])
+						+I2*(x->f1[i][j  ]+x->f2R[i][j  ]*x->C[i][j  ])
+						+I1*(x->f1[i][j-1]+x->f2R[i][j-1]*x->C[i][j-1]));
+		(*dmu) += Dl;
+	}
+	for(i=1;i<=z.Nt2;i++){
+		for(j=0;j<=i-1;j++){
+			x->dCh[i][j]= 0.5*(x->dCh[2*i][2*j]+x->dCh[2*i-1][2*j]);
+			x->dRh[i][j]= 0.5*(x->dRh[2*i][2*j]+x->dRh[2*i-1][2*j]);
+			x->df1h[i][j]= 0.5*(x->df1h[2*i][2*j]+x->df1h[2*i-1][2*j]);
+			x->df2Rh[i][j]= 0.5*(x->df2Rh[2*i][2*j]+x->df2Rh[2*i-1][2*j]);
+			x->dCv[i][j]= 0.5*(x->dCv[2*i][2*j+1]+x->dCv[2*i][2*j]);
+			x->dRv[i][j]= 0.5*(x->dRv[2*i][2*j+1]+x->dRv[2*i][2*j]);
+			x->df1v[i][j]= 0.5*(x->df1v[2*i][2*j+1]+x->df1v[2*i][2*j]);
+			x->df2Rv[i][j]= 0.5*(x->df2Rv[2*i][2*j+1]+x->df2Rv[2*i][2*j]);
+		}
+	}
+	for(i=0;i<=z.Nt2;i++){
+		for(j=0;j<=i;j++){
+			x->C[i][j]= x->C[2*i][2*j];
+			x->R[i][j]= x->R[2*i][2*j];
+ 			x->f1[i][j]= x->f1[2*i][2*j];
+			x->f2R[i][j]= x->f2R[2*i][2*j];
+		}
+	}
+	(*dt) *= 2.0;
+}
+
+void Ih(struct parr *px, int i, int j) {
+	if(i-2>=j) {
+		px->dCh[i-1][j]=I1*px->C[i][j]+I2*px->C[i-1][j]+I3*px->C[i-2][j];
+		px->dRh[i-1][j]=I1*px->R[i][j]+I2*px->R[i-1][j]+I3*px->R[i-2][j];
+		px->df1h[i-1][j]=I1*px->f1[i][j]+I2*px->f1[i-1][j]+I3*px->f1[i-2][j];
+		px->df2Rh[i-1][j]=I1*px->f2R[i][j]+I2*px->f2R[i-1][j]+I3*px->f2R[i-2][j];
+	} else if(i-1==j) {
+		px->dCh[i-1][j]=0.5*px->C[i][j]+0.5*px->C[i-1][j];
+		px->dRh[i-1][j]=0.5*px->R[i][j]+0.5*px->R[i-1][j];
+		px->df1h[i-1][j]=0.5*px->f1[i][j]+0.5*px->f1[i-1][j];
+		px->df2Rh[i-1][j]=0.5*px->f2R[i][j]+0.5*px->f2R[i-1][j];
+	}
+}
+
+void Iv(struct parr *px, int i, int j) {
+	if(j+2<=i) {
+		px->dCv[i][j]= I1*px->C[i][j]+I2*px->C[i][j+1]+I3*px->C[i][j+2];
+		px->dRv[i][j]= I1*px->R[i][j]+I2*px->R[i][j+1]+I3*px->R[i][j+2];
+		px->df1v[i][j]= I1*px->f1[i][j]+I2*px->f1[i][j+1]+I3*px->f1[i][j+2];
+		px->df2Rv[i][j]= I1*px->f2R[i][j]+I2*px->f2R[i][j+1]+I3*px->f2R[i][j+2];
+	} else if (j+1==i) {
+		px->dCv[i][j]= 0.5*px->C[i][j]+0.5*px->C[i][j+1];
+		px->dRv[i][j]= 0.5*px->R[i][j]+0.5*px->R[i][j+1];
+		px->df1v[i][j]= 0.5*px->f1[i][j]+0.5*px->f1[i][j+1];
+		px->df2Rv[i][j]= 0.5*px->f2R[i][j]+0.5*px->f2R[i][j+1];
+	}
+}
+
+void Mirroring(struct parr *px, int i, int j) {
+	px->C[j][i] = px->C[i][j];
+	px->R[j][i] = px->R[i][j];
+	px->f1[j][i] = px->f1[i][j];
+	px->f2R[j][i] = px->f2R[i][j];
+
+	px->dCv[j][i-1] = px->dCh[i-1][j];
+	px->dRv[j][i-1] = px->dRh[i-1][j];
+	px->df1v[j][i-1] = px->df1h[i-1][j];
+	px->df2Rv[j][i-1] = px->df2Rh[i-1][j];
+
+	px->dCh[j][i] = px->dCv[i][j];
+	px->dRh[j][i] = px->dRv[i][j];
+	px->df1h[j][i] = px->df1v[i][j];
+	px->df2Rh[j][i] = px->df2Rv[i][j];
+}
+
+
+void Extrapolation(struct parr *px, int i, int j) {
+	if(j-3>=0) {
+		px->C[i][j]= (D1+1.)*px->C[i-1][j-1]+D2*px->C[i-2][j-2]+D3*px->C[i-3][j-3];
+		px->R[i][j]= (D1+1.)*px->R[i-1][j-1]+D2*px->R[i-2][j-2]+D3*px->R[i-3][j-3];
+		px->f1[i][j]= (D1+1.)*px->f1[i-1][j-1]+D2*px->f1[i-2][j-2]+D3*px->f1[i-3][j-3];
+		px->f2R[i][j]= (D1+1.)*px->f2R[i-1][j-1]+D2*px->f2R[i-2][j-2]+D3*px->f2R[i-3][j-3];
+		px->dCh[i][j]= (D1+1.)*px->dCh[i-1][j-1]+D2*px->dCh[i-2][j-2]+D3*px->dCh[i-3][j-3];
+		px->dRh[i][j]= (D1+1.)*px->dRh[i-1][j-1]+D2*px->dRh[i-2][j-2]+D3*px->dRh[i-3][j-3];
+		px->df1h[i][j]= (D1+1.)*px->df1h[i-1][j-1]+D2*px->df1h[i-2][j-2]+D3*px->df1h[i-3][j-3];
+		px->df2Rh[i][j]= (D1+1.)*px->df2Rh[i-1][j-1]+D2*px->df2Rh[i-2][j-2]+D3*px->df2Rh[i-3][j-3];
+		px->dCv[i][j]= (D1+1.)*px->dCv[i-1][j-1]+D2*px->dCv[i-2][j-2]+D3*px->dCv[i-3][j-3];
+		px->dRv[i][j]= (D1+1.)*px->dRv[i-1][j-1]+D2*px->dRv[i-2][j-2]+D3*px->dRv[i-3][j-3];
+		px->df1v[i][j]= (D1+1.)*px->df1v[i-1][j-1]+D2*px->df1v[i-2][j-2]+D3*px->df1v[i-3][j-3];
+		px->df2Rv[i][j]= (D1+1.)*px->df2Rv[i-1][j-1]+D2*px->df2Rv[i-2][j-2]+D3*px->df2Rv[i-3][j-3];
+	} else if (j-2==0) {
+		px->C[i][j]= (D1+1.)*px->C[i-1][2]+D2*px->C[i-2][2]+D3*px->C[i-3][2];
+		px->R[i][j]= (D1+1.)*px->R[i-1][2]+D2*px->R[i-2][2]+D3*px->R[i-3][2];
+		px->f1[i][j]= (D1+1.)*px->f1[i-1][2]+D2*px->f1[i-2][2]+D3*px->f1[i-3][2];
+		px->f2R[i][j]= (D1+1.)*px->f2R[i-1][2]+D2*px->f2R[i-2][2]+D3*px->f2R[i-3][2];
+		px->dCh[i][j]= (D1+1.)*px->dCh[i-1][2]+D2*px->dCh[i-2][2]+D3*px->dCh[i-3][2];
+		px->dRh[i][j]= (D1+1.)*px->dRh[i-1][2]+D2*px->dRh[i-2][2]+D3*px->dRh[i-3][2];
+		px->df1h[i][j]= (D1+1.)*px->df1h[i-1][2]+D2*px->df1h[i-2][2]+D3*px->df1h[i-3][2];
+		px->df2Rh[i][j]= (D1+1.)*px->df2Rh[i-1][2]+D2*px->df2Rh[i-2][2]+D3*px->df2Rh[i-3][2];
+		px->dCv[i][j]= (D1+1.)*px->dCv[i-1][2]+D2*px->dCv[i-2][2]+D3*px->dCv[i-3][2];
+		px->dRv[i][j]= (D1+1.)*px->dRv[i-1][2]+D2*px->dRv[i-2][2]+D3*px->dRv[i-3][2];
+		px->df1v[i][j]= (D1+1.)*px->df1v[i-1][2]+D2*px->df1v[i-2][2]+D3*px->df1v[i-3][2];
+		px->df2Rv[i][j]= (D1+1.)*px->df2Rv[i-1][2]+D2*px->df2Rv[i-2][2]+D3*px->df2Rv[i-3][2];
+	} else if (j-1==0) {
+		px->C[i][j]= (D1+1.)*px->C[i-1][1]+D2*px->C[i-2][1]+D3*px->C[i-3][1];
+		px->R[i][j]= (D1+1.)*px->R[i-1][1]+D2*px->R[i-2][1]+D3*px->R[i-3][1];
+		px->f1[i][j]= (D1+1.)*px->f1[i-1][1]+D2*px->f1[i-2][1]+D3*px->f1[i-3][1];
+		px->f2R[i][j]= (D1+1.)*px->f2R[i-1][1]+D2*px->f2R[i-2][1]+D3*px->f2R[i-3][1];
+		px->dCh[i][j]= (D1+1.)*px->dCh[i-1][1]+D2*px->dCh[i-2][1]+D3*px->dCh[i-3][1];
+		px->dRh[i][j]= (D1+1.)*px->dRh[i-1][1]+D2*px->dRh[i-2][1]+D3*px->dRh[i-3][1];
+		px->df1h[i][j]= (D1+1.)*px->df1h[i-1][1]+D2*px->df1h[i-2][1]+D3*px->df1h[i-3][1];
+		px->df2Rh[i][j]= (D1+1.)*px->df2Rh[i-1][1]+D2*px->df2Rh[i-2][1]+D3*px->df2Rh[i-3][1];
+		px->dCv[i][j]= (D1+1.)*px->dCv[i-1][1]+D2*px->dCv[i-2][1]+D3*px->dCv[i-3][1];
+		px->dRv[i][j]= (D1+1.)*px->dRv[i-1][1]+D2*px->dRv[i-2][1]+D3*px->dRv[i-3][1];
+		px->df1v[i][j]= (D1+1.)*px->df1v[i-1][1]+D2*px->df1v[i-2][1]+D3*px->df1v[i-3][1];
+		px->df2Rv[i][j]= (D1+1.)*px->df2Rv[i-1][1]+D2*px->df2Rv[i-2][1]+D3*px->df2Rv[i-3][1];
+	}  else if (j==0) {
+		px->C[i][j]= (D1+1.)*px->C[i-1][0]+D2*px->C[i-2][0]+D3*px->C[i-3][0];
+		px->R[i][j]= (D1+1.)*px->R[i-1][0]+D2*px->R[i-2][0]+D3*px->R[i-3][0];
+		px->f1[i][j]= (D1+1.)*px->f1[i-1][0]+D2*px->f1[i-2][0]+D3*px->f1[i-3][0];
+		px->f2R[i][j]= (D1+1.)*px->f2R[i-1][0]+D2*px->f2R[i-2][0]+D3*px->f2R[i-3][0];
+		px->dCh[i][j]= (D1+1.)*px->dCh[i-1][0]+D2*px->dCh[i-2][0]+D3*px->dCh[i-3][0];
+		px->dRh[i][j]= (D1+1.)*px->dRh[i-1][0]+D2*px->dRh[i-2][0]+D3*px->dRh[i-3][0];
+		px->df1h[i][j]= (D1+1.)*px->df1h[i-1][0]+D2*px->df1h[i-2][0]+D3*px->df1h[i-3][0];
+		px->df2Rh[i][j]= (D1+1.)*px->df2Rh[i-1][0]+D2*px->df2Rh[i-2][0]+D3*px->df2Rh[i-3][0];
+		px->dCv[i][j]= (D1+1.)*px->dCv[i-1][0]+D2*px->dCv[i-2][0]+D3*px->dCv[i-3][0];
+		px->dRv[i][j]= (D1+1.)*px->dRv[i-1][0]+D2*px->dRv[i-2][0]+D3*px->dRv[i-3][0];
+		px->df1v[i][j]= (D1+1.)*px->df1v[i-1][0]+D2*px->df1v[i-2][0]+D3*px->df1v[i-3][0];
+		px->df2Rv[i][j]= (D1+1.)*px->df2Rv[i-1][0]+D2*px->df2Rv[i-2][0]+D3*px->df2Rv[i-3][0];
+	}
 }
 
 /**************************SeLf-CoNsIsTeNcE****************************/
 
-double SC2(double *gC, double *gQ, double D, double mu, struct pmct z, struct parr x, struct psys w,int i, int j){
+double SC2(double *gC, double *gR, double D, double mu, struct pmct z, struct parr x, int i, int j){
   int m;
-  double i1C,i2C,i3C,i4C,i1Q,i2Q,i3Q,i4Q;
+  double i1C,i2C,i3C,i4C,i1R,i2R,i3R,i4R;
   m = (int)(0.5*(i+j));
   i1C = I1C(x,i,j,m);
   i2C = I2C(x,i,j,m);
   i3C = I3C(x,i,j);
   i4C = I4C(x,i,j);
-  i1Q = I1Q(x,i,j,m);
-  i2Q = I2Q(x,i,j,m);
-  i3Q = i3C;
-  i4Q = i4C;
+  i1R = I1R(x,i,j,m);
+  i2R = I2R(x,i,j,m);
+  i3R = i3C;
+  i4R = i4C;
 
-  gC[j] = -D3/x.dt*x.C[i-2][j]-D2/x.dt*x.C[i-1][j]+(-i1C+i2C+i3C+i4C)/w.T;
-  gC[j]-= (1./w.T-w.beta)*fd1(x.C[i][0],w)*x.C[j][0];
+  gC[j] = -D3/x.dt*x.C[i-2][j]-D2/x.dt*x.C[i-1][j]+(-i1C+i2C+i3C+i4C)/z.T;
+  gC[j]-= (1./z.T-z.beta)*f1(x.C[i][0],z)*x.C[j][0];
   gC[j]/= D;
   gC[j]-= x.C[i][j];
-  gQ[j] = -w.T+mu-D3/x.dt*x.Q[i-2][j]-D2/x.dt*x.Q[i-1][j]+(-i1Q-i2Q-i3Q-i4Q)/w.T;
-  gQ[j]+= (1./w.T-w.beta)*fd1(x.C[i][0],w)*x.C[j][0];
-  gQ[j]/= D;
-  gQ[j]-= x.Q[i][j];
+  gR[j] = -z.T+mu-D3/x.dt*x.R[i-2][j]-D2/x.dt*x.R[i-1][j]+(-i1R-i2R-i3R-i4R)/z.T;
+  gR[j]+= (1./z.T-z.beta)*f1(x.C[i][0],z)*x.C[j][0];
+  gR[j]/= D;
+  gR[j]-= x.R[i][j];
 	
-  return sqrt(gC[j]*gC[j]+gQ[j]*gQ[j]);
+  return gC[j]*gC[j]+gR[j]*gR[j];
+}
+
+double If2RR(struct pmct z,struct parr x,int i,int j){
+	double I=0;
+	int k;
+	//I+=0.5*(f2(x.C[i][j],z)*x.R[i][j]*x.R[j][j]+f2(x.C[i][i],z)*x.R[i][i]*x.R[j][i]);
+	I+=0.5*(x.f2R[i][j]*x.R[j][j]+x.f2R[i][i]*x.R[j][i]);
+	for(k=j+1;k<i;k++){
+		//I+=f2(x.C[i][k],z)*x.R[i][k]*x.R[j][k];
+		I+=x.f2R[i][k]*x.R[j][k];
+	}
+	I*=x.dt;
+	return I;
+}
+
+
+double If2RC(struct pmct z,struct parr x,int i,int j){
+	double I=0;
+	int k;
+	//I+=0.5*(f2(x.C[i][0],z)*x.R[i][0]*x.C[j][0]+f2(x.C[i][i],z)*x.R[i][i]*x.C[j][i]);
+	I+=0.5*(x.f2R[i][0]*x.C[j][0]+x.f2R[i][i]*x.C[j][i]);
+	for(k=1;k<i;k++){
+		//I+=f2(x.C[i][k],z)*x.R[i][k]*x.C[j][k];
+		I+=x.f2R[i][k]*x.C[j][k];
+	}
+	I*=x.dt;
+	return I;
+}
+
+double If1R(struct pmct z,struct parr x,int i,int j){
+	double I=0;
+	int k;
+	//I+=0.5*(f1(x.C[i][0],z)*x.R[j][0]+f1(x.C[i][j],z)*x.R[j][j]);
+	I+=0.5*(x.f1[i][0]*x.R[j][0]+x.f1[i][j]*x.R[j][j]);
+	for(k=1;k<j;k++){
+		//I+=f1(x.C[i][k],z)*x.R[j][k];
+		I+=x.f1[i][k]*x.R[j][k];
+	}
+	I*=x.dt;
+	return I;
 }
 
 double I1C(struct parr x,int i,int j,int m){
@@ -434,8 +519,8 @@ double I2C(struct parr x,int i,int j,int m){
   int l;
   double sum;
   sum = 0.0;
-  for(l=m+1;l<=i;l++) sum += x.df2v[i][l-1]*(x.Q[i][l]-x.Q[i][l-1])*(x.C[l][j]+x.C[l-1][j]);
-  for(l=j+1;l<=m;l++) sum += (x.f2[i][l]+x.f2[i][l-1])*(x.Q[i][l]-x.Q[i][l-1])*x.dCh[l][j];
+  for(l=m+1;l<=i;l++) sum += x.df2Rv[i][l-1]*(x.R[i][l]-x.R[i][l-1])*(x.C[l][j]+x.C[l-1][j]);
+  for(l=j+1;l<=m;l++) sum += (x.f2R[i][l]+x.f2R[i][l-1])*(x.R[i][l]-x.R[i][l-1])*x.dCh[l][j];
   return 0.5*sum;
 }
 
@@ -443,8 +528,8 @@ double I3C(struct parr x,int i,int j){
   int l;
   double sum;
   sum = 0.0;
-  sum += x.f1[i][j]*x.Q[j][j]-x.f1[i][0]*x.Q[j][0];
-  for(l=1;l<=j;l++) sum -= (x.f1[i][l]-x.f1[i][l-1])*x.dQv[j][l-1];
+  sum += x.f1[i][j]*x.R[j][j]-x.f1[i][0]*x.R[j][0];
+  for(l=1;l<=j;l++) sum -= (x.f1[i][l]-x.f1[i][l-1])*x.dRv[j][l-1];
   return sum;
 }
 
@@ -452,65 +537,32 @@ double I4C(struct parr x,int i,int j){
   int l;
   double sum;
   sum = 0.0;
-  for(l=1;l<=j;l++) sum += (x.f2[i][l]+x.f2[i][l-1])*(x.Q[i][l]-x.Q[i][l-1])*x.dCv[j][l-1];
+  for(l=1;l<=j;l++) sum += (x.f2R[i][l]+x.f2R[i][l-1])*(x.R[i][l]-x.R[i][l-1])*x.dCv[j][l-1];
   return 0.5*sum;
 }
 
-double I1Q(struct parr x,int i,int j,int m){
+double I1R(struct parr x,int i,int j,int m){
   int l;
   double sum;
   sum = 0.0;
-  sum += x.f1[i][m]*x.Q[m][j]-x.f1[i][j]*x.Q[j][j];
+  sum += x.f1[i][m]*x.R[m][j]-x.f1[i][j]*x.R[j][j];
   for(l=m+1;l<=i-1;l++){
-    sum += x.df1v[i][l-1]*(x.Q[l][j]-x.Q[l-1][j]);
+    sum += x.df1v[i][l-1]*(x.R[l][j]-x.R[l-1][j]);
   }
-  sum += x.df1v[i][i-1]*(-x.Q[i-1][j]);
+  sum += x.df1v[i][i-1]*(-x.R[i-1][j]);
   for(l=j+1;l<=m;l++){
-    sum -= (x.f1[i][l]-x.f1[i][l-1])*x.dQh[l][j];
+    sum -= (x.f1[i][l]-x.f1[i][l-1])*x.dRh[l][j];
   }
   return sum;
 }
 
-double I2Q(struct parr x,int i,int j,int m){
+double I2R(struct parr x,int i,int j,int m){
   int l;
   double sum;
   sum = 0.0;
-  for(l=m+1;l<=i;l++) sum += x.df2v[i][l-1]*(x.Q[i][l]-x.Q[i][l-1])*(2.0-x.Q[l][j]-x.Q[l-1][j]);
-  for(l=j+1;l<=m;l++) sum += (x.f2[i][l]+x.f2[i][l-1])*(x.Q[i][l]-x.Q[i][l-1])*(1.0-x.dQh[l][j]);
+  for(l=m+1;l<=i;l++) sum += x.df2Rv[i][l-1]*(x.R[i][l]-x.R[i][l-1])*(2.0-x.R[l][j]-x.R[l-1][j]);
+  for(l=j+1;l<=m;l++) sum += (x.f2R[i][l]+x.f2R[i][l-1])*(x.R[i][l]-x.R[i][l-1])*(1.0-x.dRh[l][j]);
   return 0.5*sum;
-}
-
-void contract(struct pmct z,struct parr *x,double *dt,double *dmu){
-  int i,j;
-  double Dl;
-  i=z.Nt;
-  for(j=z.Nt-z.Nc*2+1;j<=z.Nt-z.Nc;j++){
-    Dl=(x->Q[i][j]-x->Q[i][j-1])*(I3*(x->f1[i][j+1]+x->f2[i][j+1]*x->C[i][j+1])
-				+I2*(x->f1[i][j  ]+x->f2[i][j  ]*x->C[i][j  ])
-				+I1*(x->f1[i][j-1]+x->f2[i][j-1]*x->C[i][j-1]));
-    (*dmu) += Dl;
-  }
-  for(i=1;i<=z.Nt2;i++){
-    for(j=0;j<=i-1;j++){
-      x->dCh[i][j]= 0.5*(x->dCh[2*i][2*j]+x->dCh[2*i-1][2*j]);
-      x->dQh[i][j]= 0.5*(x->dQh[2*i][2*j]+x->dQh[2*i-1][2*j]);
-      x->df1h[i][j]= 0.5*(x->df1h[2*i][2*j]+x->df1h[2*i-1][2*j]);
-      x->df2h[i][j]= 0.5*(x->df2h[2*i][2*j]+x->df2h[2*i-1][2*j]);
-      x->dCv[i][j]= 0.5*(x->dCv[2*i][2*j+1]+x->dCv[2*i][2*j]);
-      x->dQv[i][j]= 0.5*(x->dQv[2*i][2*j+1]+x->dQv[2*i][2*j]);
-      x->df1v[i][j]= 0.5*(x->df1v[2*i][2*j+1]+x->df1v[2*i][2*j]);
-      x->df2v[i][j]= 0.5*(x->df2v[2*i][2*j+1]+x->df2v[2*i][2*j]);
-    }
-  }
-  for(i=0;i<=z.Nt2;i++){
-    for(j=0;j<=i;j++){
-      x->C[i][j]= x->C[2*i][2*j];
-      x->Q[i][j]= x->Q[2*i][2*j];
-      x->f1[i][j]= x->f1[2*i][2*j];
-      x->f2[i][j]= x->f2[2*i][2*j];
-    }
-  }
-  (*dt) *= 2.0;
 }
 
 double power(double x,int p){
@@ -520,70 +572,39 @@ double power(double x,int p){
 	return ff;
 }
 
-/*double If2RR(int i, int j){
-	double I=0;
-	int k;
-		for (k=j+1;k<i;k++){
-	I+=fd2(C[i][k])*R[i][k]*R[j][k];
-	}
-	I*=h;
-	return I;
+double f(double x, struct pmct z){
+	return 0.5*power(x,z.p) + z.s_eps*0.5*power(x,z.s);
 }
 
-
-double If2RC(int i, int j){
-	double I=0;
-	int k;
-	for (k=0;k<i;k++){
-		I+=fd2( C[i][k] )*R[i][k]*C[j][k];
-	}
-	I*=h;
-	return I;
+double f1(double x, struct pmct z){
+	return 0.5*(z.p)*power(x,z.p-1.0) + z.s_eps*0.5*(z.s)*power(x,z.s-1.0);
 }
 
-double If1R(int i, int j){
-	double I=0;
-	int k;
-	for (k=0;k<j;k++){
-		I+=fd1( C[i][k] )*R[j][k];
-	}
-  	I*=h;
-	return I;
-}*/
-
-double f(double x, struct psys w){
-	return 0.5*power(x,w.p) + w.s_eps*0.5*power(x,w.s);
+double f2(double x, struct pmct z){
+	return 0.5*(z.p)*(z.p-1.0)*power(x,z.p-2.0) + z.s_eps*0.5*(z.s)*(z.s-1.0)*power(x,z.s-2.0);
 }
 
-double fd1(double x, struct psys w){
-	return 0.5*(w.p)*power(x,w.p-1.0) + w.s_eps*0.5*(w.s)*power(x,w.s-1.0);
-}
-
-double fd2(double x, struct psys w){
-	return 0.5*(w.p)*(w.p-1.0)*power(x,w.p-2.0) + w.s_eps*0.5*(w.s)*(w.s-1.0)*power(x,w.s-2.0);
-}
-
-double mu_t(struct pmct z,struct parr x,struct psys w,int i){
+double mu_t(struct pmct z,struct parr x,int i){
 	int l;
 	double mu;
-	mu = w.T + x.dmu;
+	mu = z.T + x.dmu;
 	for(l=1;l<=i-z.Nc;l++){
-		mu+=(x.Q[i][l]-x.Q[i][l-1])*(I3*(x.f1[i][l+1]+x.f2[i][l+1]*x.C[i][l+1])
-			+I2*(x.f1[i][l  ]+x.f2[i][l  ]*x.C[i][l  ])
-			+I1*(x.f1[i][l-1]+x.f2[i][l-1]*x.C[i][l-1])
-		)/w.T;
+		mu+=(x.R[i][l]-x.R[i][l-1])*(I3*(x.f1[i][l+1]+x.f2R[i][l+1]*x.C[i][l+1])
+			+I2*(x.f1[i][l  ]+x.f2R[i][l  ]*x.C[i][l  ])
+			+I1*(x.f1[i][l-1]+x.f2R[i][l-1]*x.C[i][l-1])
+		)/z.T;
 	}
-	mu -= (1./w.T-w.beta)*fd1(x.C[i][0],w)*x.C[i][0];
+	mu -= (1./z.T-z.beta)*f1(x.C[i][0],z)*x.C[i][0];
 	return mu;
 }
 
-double E_t(struct pmct z,struct parr x,struct psys w,int i){
+double E_t(struct pmct z,struct parr x,int i){
 	int l;
 	double E = 0.;
 	for(l=1;l<=i;l++){
-		E += (x.Q[i][l]-x.Q[i][l-1])*(I3*x.f1[i][l+1]+I2*x.f1[i][l]+I1*x.f1[i][l-1])/w.T;
+		E += (x.R[i][l]-x.R[i][l-1])*(I3*x.f1[i][l+1]+I2*x.f1[i][l]+I1*x.f1[i][l-1])/z.T;
 	}
-	E -= w.beta*f(x.C[i][0],w);
+	E -= z.beta*f(x.C[i][0],z);
 	return E;
 }
 
@@ -595,32 +616,32 @@ void array_initialization(struct pmct z,struct parr *px) {
 	px->mu = (double *) calloc ((z.Nt+1),sizeof(double));
 	px->E = (double *) calloc ((z.Nt+1),sizeof(double));
 	px->C  = (double **) malloc ((z.Nt+1) * sizeof(double*));
-	px->Q  = (double **) malloc ((z.Nt+1) * sizeof(double*));
+	px->R  = (double **) malloc ((z.Nt+1) * sizeof(double*));
 	px->f1  = (double **) malloc ((z.Nt+1) * sizeof(double*));
-	px->f2  = (double **) malloc ((z.Nt+1) * sizeof(double*));
+	px->f2R  = (double **) malloc ((z.Nt+1) * sizeof(double*));
 	px->dCh= (double **) malloc ((z.Nt+1) * sizeof(double*));
-	px->dQh= (double **) malloc ((z.Nt+1) * sizeof(double*));
+	px->dRh= (double **) malloc ((z.Nt+1) * sizeof(double*));
 	px->df1h= (double **) malloc ((z.Nt+1) * sizeof(double*));
-	px->df2h= (double **) malloc ((z.Nt+1) * sizeof(double*));
+	px->df2Rh= (double **) malloc ((z.Nt+1) * sizeof(double*));
 	px->dCv= (double **) malloc ((z.Nt+1) * sizeof(double*));
-	px->dQv= (double **) malloc ((z.Nt+1) * sizeof(double*));
+	px->dRv= (double **) malloc ((z.Nt+1) * sizeof(double*));
 	px->df1v= (double **) malloc ((z.Nt+1) * sizeof(double*));
-	px->df2v= (double **) malloc ((z.Nt+1) * sizeof(double*));
+	px->df2Rv= (double **) malloc ((z.Nt+1) * sizeof(double*));
 
 
 	for(i=0;i<(z.Nt+1);i++) {
 		px->C[i]  = (double *) calloc ((z.Nt+1),sizeof(double));
-		px->Q[i]  = (double *) calloc ((z.Nt+1),sizeof(double));
+		px->R[i]  = (double *) calloc ((z.Nt+1),sizeof(double));
 		px->f1[i]  = (double *) calloc ((z.Nt+1),sizeof(double));
-		px->f2[i]  = (double *) calloc ((z.Nt+1),sizeof(double));
+		px->f2R[i]  = (double *) calloc ((z.Nt+1),sizeof(double));
 		px->dCh[i]= (double *) calloc ((z.Nt+1),sizeof(double));
-		px->dQh[i]= (double *) calloc ((z.Nt+1),sizeof(double));
+		px->dRh[i]= (double *) calloc ((z.Nt+1),sizeof(double));
 		px->df1h[i]= (double *) calloc ((z.Nt+1),sizeof(double));
-		px->df2h[i]= (double *) calloc ((z.Nt+1),sizeof(double));
+		px->df2Rh[i]= (double *) calloc ((z.Nt+1),sizeof(double));
 		px->dCv[i]= (double *) calloc ((z.Nt+1),sizeof(double));
-		px->dQv[i]= (double *) calloc ((z.Nt+1),sizeof(double));
+		px->dRv[i]= (double *) calloc ((z.Nt+1),sizeof(double));
 		px->df1v[i]= (double *) calloc ((z.Nt+1),sizeof(double));
-		px->df2v[i]= (double *) calloc ((z.Nt+1),sizeof(double));
+		px->df2Rv[i]= (double *) calloc ((z.Nt+1),sizeof(double));
 	}
 }
 
@@ -628,11 +649,11 @@ void array_initialization(struct pmct z,struct parr *px) {
 
 void parameters_initialization(struct pmct *pz,struct parr *px, struct psys *pw, char *argv[]) {
 	/* system parameters */
-	pw->T = 1./atof(argv[1]);			//  T
-	pw->beta = atof(argv[2]);			//  beta'
-	pw->p     = 3.0;					//  f1(x) = x^p/(2T^2)
-	pw->s_eps = atof(argv[3]);		//	weight of s-spin
-	pw->s     = 4.0;					//  f2(x) = x^s/(2T^2)
+	pz->T = 1./atof(argv[1]);		//  T
+	pz->beta = atof(argv[2]);		//  beta'
+	pz->p     = 3.0;			//  f1(x) = x^p/2
+	pz->s_eps = atof(argv[3]);		//	weight of s-spin
+	pz->s     = 4.0;			//  f2(x) = x^s/2
 
 	/* mct parameters */
 	pz->Ntexp = atoi(argv[4]);         	//  Nt=2^{Ntexp}  [5..10]
@@ -641,25 +662,23 @@ void parameters_initialization(struct pmct *pz,struct parr *px, struct psys *pw,
 
 	pz->den  = 1 << 5;			// Nt/Nc
 	pz->Nc = 1 << 2;
-	pz->itr = 50;				// number of cycle.
+	pz->itr = 0;				// number of cycle.
 
-	pz->t0 = 1.0E-4;		// Initial time window
-	pz->Cmin = 1.0E-12;		// Minimal value accepted before setting C identically equal to 0.
-	pz->eps= 1.0E-12; 		// Accepted error distance between the solution and the discrete equation ->
-	pz->rpt= 1000;			// 		in the iteration procedure with z.rpt the maximum number of iterations
+	pz->t0 = 1.0E0;			// Initial time window
+	pz->Cmin = 1.0E-12;			// Minimal value accepted before setting C identically equal to 0.
+	pz->eps= 1.0E-12; 			// Accepted error distance between the solution and the discrete equation ->
+	pz->rpt= 1000;				// 		in the iteration procedure with z.rpt the maximum number of iterations
 
-	pz->alpha = 1.;		// Coefficient of self-consistence iteration
+	pz->alpha = 1.;				// Coefficient of self-consistence iteration
 
 	/* array parameters */
-	px->R = pw->T*pw->beta;		//Out of equilibrium parameter (R=1 --> equilibrium dynamics)
-	px->dt = pz->t0/pz->Nt2;	// Grid time set to Initial Grid time
+	px->dt = pz->t0/pz->Nt2;		// Grid time set to Initial Grid time
 	px->dmu = 0.;				//IMPORTANT: local upgrade of mu
 
 	/* output files */
 	sprintf(pw->file,"0.dat");
-	sprintf(pw->dir,"CQ_T%.5f_beta%.5fNt%dt0%.2e",pw->T,pw->beta,pz->Nt,pz->t0);
-    mkdir(pw->dir, 0700);
-
+	sprintf(pw->dir,"CR_T%.5f_beta%.5fNt%dt0%.2e",pz->T,pz->beta,pz->Nt,pz->t0);
+    	mkdir(pw->dir, 0700);
 }
 
 /**************************ScReEn****************************/
@@ -676,11 +695,11 @@ void save_config(struct pmct z,struct parr x,struct psys w) {
 	//pmct z
 	fprintf(f,"%d %d %d %d %d %d %d\n",z.Nt,z.Ntexp,z.Nt2,z.Nc,z.rpt,z.den,z.itr);
 	fprintf(f,"%.5e %.5e %.5e %.5e %.5e\n",z.t,z.Cmin,z.t0,z.eps,z.alpha);
+	fprintf(f,"%.5e %.5e %.5e %.10e %.10e\n",z.p,z.s_eps,z.s,z.T,z.beta);
 	//psys w
 	fprintf(f,"%s %s\n",w.file,w.dir);
-	fprintf(f,"%.5e %.5e %.5e %.10e %.10e\n",w.p,w.s_eps,w.s,w.T,w.beta);
 	//parr x
-	fprintf(f,"%.5e %.5e %.5e\n",x.R,x.dt,x.dmu);
+	fprintf(f,"%.5e %.5e\n",x.dt,x.dmu);
 	
 	for (i=0; i<z.Nt+1; i++) {
 		fprintf(f,"%.5e ",x.mu[i]);
@@ -689,9 +708,9 @@ void save_config(struct pmct z,struct parr x,struct psys w) {
 
 	for (i=0; i<z.Nt+1; i++) {
 		for (j=0; j<z.Nt+1; j++) {
-			fprintf(f,"%.5e %.5e %.5e %.5e ",x.C[i][j],x.Q[i][j],x.f1[i][j],x.f2[i][j]);
-			fprintf(f,"%.5e %.5e %.5e %.5e ",x.dCh[i][j],x.dQh[i][j],x.df1h[i][j],x.df2h[i][j]);
-			fprintf(f,"%.5e %.5e %.5e %.5e ",x.dCv[i][j],x.dQv[i][j],x.df1v[i][j],x.df2v[i][j]);
+			fprintf(f,"%.5e %.5e %.5e %.5e ",x.C[i][j],x.R[i][j],x.f1[i][j],x.f2R[i][j]);
+			fprintf(f,"%.5e %.5e %.5e %.5e ",x.dCh[i][j],x.dRh[i][j],x.df1h[i][j],x.df2Rh[i][j]);
+			fprintf(f,"%.5e %.5e %.5e %.5e ",x.dCv[i][j],x.dRv[i][j],x.df1v[i][j],x.df2Rv[i][j]);
 		}	
 	}
 	fprintf(f,"\n");
@@ -709,11 +728,11 @@ void open_config(struct pmct *pz,struct parr *px,struct psys *pw, char *dir) {
 	//pmct z
 	fscanf(f,"%d %d %d %d %d %d %d\n",&pz->Nt,&pz->Ntexp,&pz->Nt2,&pz->Nc,&pz->rpt,&pz->den,&pz->itr);
 	fscanf(f,"%lf %lf %lf %lf %lf\n",&pz->t,&pz->Cmin,&pz->t0,&pz->eps,&pz->alpha);
+	fscanf(f,"%lf %lf %lf %lf %lf\n",&pz->p,&pz->s_eps,&pz->s,&pz->T,&pz->beta);
 	//psys w
 	fscanf(f,"%s %s\n",pw->file,pw->dir);
-	fscanf(f,"%lf %lf %lf %lf %lf\n",&pw->p,&pw->s_eps,&pw->s,&pw->T,&pw->beta);
 	//parr x
-	fscanf(f,"%lf %lf %lf\n",&px->R,&px->dt,&px->dmu);
+	fscanf(f,"%lf %lf\n",&px->dt,&px->dmu);
 
 	array_initialization(*pz,px);
 	
@@ -724,9 +743,9 @@ void open_config(struct pmct *pz,struct parr *px,struct psys *pw, char *dir) {
 
 	for (i=0; i<pz->Nt+1; i++) {
 		for (j=0; j<pz->Nt+1; j++) {
-			fscanf(f,"%lf %lf %lf %lf ",&px->C[i][j],&px->Q[i][j],&px->f1[i][j],&px->f2[i][j]);
-			fscanf(f,"%lf %lf %lf %lf ",&px->dCh[i][j],&px->dQh[i][j],&px->df1h[i][j],&px->df2h[i][j]);
-			fscanf(f,"%lf %lf %lf %lf ",&px->dCv[i][j],&px->dQv[i][j],&px->df1v[i][j],&px->df2v[i][j]);
+			fscanf(f,"%lf %lf %lf %lf ",&px->C[i][j],&px->R[i][j],&px->f1[i][j],&px->f2R[i][j]);
+			fscanf(f,"%lf %lf %lf %lf ",&px->dCh[i][j],&px->dRh[i][j],&px->df1h[i][j],&px->df2Rh[i][j]);
+			fscanf(f,"%lf %lf %lf %lf ",&px->dCv[i][j],&px->dRv[i][j],&px->df1v[i][j],&px->df2Rv[i][j]);
 		}	
 	}
 	fscanf(f,"\n");
@@ -749,19 +768,18 @@ void write_parameters(struct pmct z,struct parr x,struct psys w){
   fprintf(fout,"# This directory name: '%s'\n",w.dir);
   fprintf(fout,"####[System-related parameters]############");
   fprintf(fout,"##########################################\n");
-  fprintf(fout,"# w.T      =%.5f\n", w.T);
-  fprintf(fout,"# w.beta   =%.5f\n", w.beta);
+  fprintf(fout,"# z.T      =%.5f\n", z.T);
+  fprintf(fout,"# z.beta   =%.5f\n", z.beta);
   fprintf(fout,"# z.Nt     =2^%d=%d\n",   z.Ntexp,z.Nt);
   fprintf(fout,"# z.Nc     =%d   \n",   z.Nc);
-  fprintf(fout,"# w.p      =%.0f  \n",   w.p);
-  fprintf(fout,"# w.s_eps  =%.2e  \n",   w.s_eps);
-  fprintf(fout,"# w.s      =%.0f  \n",   w.s);
+  fprintf(fout,"# z.p      =%.0f  \n",   z.p);
+  fprintf(fout,"# z.s_eps  =%.2e  \n",   z.s_eps);
+  fprintf(fout,"# z.s      =%.0f  \n",   z.s);
   fprintf(fout,"# z.itr    =%d    \n",   z.itr);
   fprintf(fout,"# z.Cmin   =%.1e \n",   z.Cmin);
   fprintf(fout,"# z.t0     =%.2e \n",   z.t0);
   fprintf(fout,"# z.rpt    =%d   \n",   z.rpt);
   fprintf(fout,"# z.eps    =%.1e \n",   z.eps);
-  fprintf(fout,"# x.R      =w.T*w.beta=%.2e \n",   x.R);
   fprintf(fout,"####[Time stamp]##########################");
   fprintf(fout,"##########################################\n");
   fclose(fout);
@@ -778,7 +796,7 @@ void write_C_0(struct parr x, struct psys w, int ini, int ifi){
 	}
 
 	for(i=ini;i<=ifi;i++) {
-		fprintf(fout,"%1.5e\t%1.5e\t%1.5e\t%1.5e\t%1.5e\n",(double)i*x.dt,x.C[i][0],x.Q[i][0],x.mu[i],x.E[i]);
+		fprintf(fout,"%1.5e\t%1.5e\t%1.5e\t%1.5e\t%1.5e\n",(double)i*x.dt,x.C[i][0],x.R[i][0],x.mu[i],x.E[i]);
   	}
 	fclose(fout);
 }
