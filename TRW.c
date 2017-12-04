@@ -82,6 +82,9 @@ double SC2(double *gC,double *gR,double D,double mu,struct pmct z,struct parr x,
 double If2RR(struct pmct z,struct parr x,int i,int j);
 double If2RC(struct pmct z,struct parr x,int i,int j);
 double If1R(struct pmct z,struct parr x,int i,int j);
+double grid_If2RR(struct pmct z,struct parr x,int i,int j);
+double grid_If2RC(struct pmct z,struct parr x,int i,int j);
+double grid_If1R(struct pmct z,struct parr x,int i,int j);
 double I1C(struct parr x,int i,int j,int m);
 double I2C(struct parr x,int i,int j,int m);
 double I3C(struct parr x,int i,int j);
@@ -218,8 +221,8 @@ void initialarray(struct pmct z,struct parr *px){
 
 		for(j=i;j>=0;j--){
 
-			px->C[i+1][j] = px->C[i][j]+px->dt*(-px->mu[i]*px->C[i][j]+If2RC(z,*px,i,j)+If1R(z,*px,i,j)+z.beta*f1(px->C[i][0],z)*px->C[j][0]);
-			px->R[i+1][j] = px->R[i][j]+px->dt*(-px->mu[i]*px->R[i][j]+If2RR(z,*px,i,j));
+			px->C[i+1][j] = px->C[i][j]+px->dt*(-px->mu[i]*px->C[i][j]+grid_If2RC(z,*px,i,j)+grid_If1R(z,*px,i,j)+z.beta*f1(px->C[i][0],z)*px->C[j][0]);
+			px->R[i+1][j] = px->R[i][j]+px->dt*(-px->mu[i]*px->R[i][j]+grid_If2RR(z,*px,i,j));
 			px->f1[i+1][j] = f1(px->C[i+1][j],z);
 			px->f2R[i+1][j] = f2(px->C[i+1][j],z)*px->R[i+1][j];
 
@@ -235,8 +238,8 @@ void initialarray(struct pmct z,struct parr *px){
 		Iv(px,i+1,i);						//
 		Mirroring(px,i+1,i);					//
 
-		px->mu[i+1]=If1R(z,*px,i+1,i+1)+If2RC(z,*px,i+1,i+1)+z.T+z.beta*f1(px->C[i+1][0],z)*px->C[i+1][0]; // Questa e' la prescrizione migliore per mu
-		px->E[i+1]=-z.beta*f(px->C[i+1][0],z)-If1R(z,*px,i+1,i+1);
+		px->mu[i+1]=grid_If1R(z,*px,i+1,i+1)+grid_If2RC(z,*px,i+1,i+1)+z.T+z.beta*f1(px->C[i+1][0],z)*px->C[i+1][0]; // Questa e' la prescrizione migliore per mu
+		px->E[i+1]=-z.beta*f(px->C[i+1][0],z)-grid_If1R(z,*px,i+1,i+1);
 
 		px->C[i+1][i+1]=1;
 		px->R[i][i]=0;
@@ -495,6 +498,37 @@ double If1R(struct pmct z,struct parr x,int i,int j){
 	for(k=1;k<j;k++){
 		//I+=f1(x.C[i][k],z)*x.R[j][k];
 		I+=x.f1[i][k]*x.R[j][k];
+	}
+	I*=x.dt;
+	return I;
+}
+
+double grid_If2RR(struct pmct z,struct parr x,int i,int j){
+	double I=0;
+	int k;
+	for(k=j;k<i;k++){
+		I+=x.df2Rv[i][k]*x.dRv[j][k];
+	}
+	I*=x.dt;
+	return I;
+}
+
+
+double grid_If2RC(struct pmct z,struct parr x,int i,int j){
+	double I=0;
+	int k;
+	for(k=0;k<i;k++){
+		I+=x.df2Rv[i][k]*x.dCv[j][k];
+	}
+	I*=x.dt;
+	return I;
+}
+
+double grid_If1R(struct pmct z,struct parr x,int i,int j){
+	double I=0;
+	int k;
+	for(k=0;k<j;k++){
+		I+=x.df1v[i][k]*x.dRv[j][k];
 	}
 	I*=x.dt;
 	return I;
