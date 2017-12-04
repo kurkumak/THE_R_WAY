@@ -82,15 +82,12 @@ double SC2(double *gC,double *gR,double D,double mu,struct pmct z,struct parr x,
 double If2RR(struct pmct z,struct parr x,int i,int j);
 double If2RC(struct pmct z,struct parr x,int i,int j);
 double If1R(struct pmct z,struct parr x,int i,int j);
-double grid_If2RR(struct pmct z,struct parr x,int i,int j);
-double grid_If2RC(struct pmct z,struct parr x,int i,int j);
-double grid_If1R(struct pmct z,struct parr x,int i,int j);
-double I1C(struct parr x,int i,int j,int m);
-double I2C(struct parr x,int i,int j,int m);
-double I3C(struct parr x,int i,int j);
-double I4C(struct parr x,int i,int j);
-double I1R(struct parr x,int i,int j,int m);
-double I2R(struct parr x,int i,int j,int m);
+double grid_If2RR(struct parr x,int i,int j);
+double grid_If2RC(struct parr x,int i,int j);
+double grid_If1R(struct parr x,int i,int j);
+double grid_reduced_If2RR(struct parr x,int i,int j);
+double grid_reduced_If2RC(struct parr x,int i,int j);
+/**************************GeNeRaLfUnCtIoNs****************************/
 double power(double x,int p);
 double f(double x,struct pmct z);
 double f1(double x,struct pmct z);
@@ -221,8 +218,8 @@ void initialarray(struct pmct z,struct parr *px){
 
 		for(j=i;j>=0;j--){
 
-			px->C[i+1][j] = px->C[i][j]+px->dt*(-px->mu[i]*px->C[i][j]+grid_If2RC(z,*px,i,j)+grid_If1R(z,*px,i,j)+z.beta*f1(px->C[i][0],z)*px->C[j][0]);
-			px->R[i+1][j] = px->R[i][j]+px->dt*(-px->mu[i]*px->R[i][j]+grid_If2RR(z,*px,i,j));
+			px->C[i+1][j] = px->C[i][j]+px->dt*(-px->mu[i]*px->C[i][j]+grid_If2RC(*px,i,j)+grid_If1R(*px,i,j)+z.beta*f1(px->C[i][0],z)*px->C[j][0]);
+			px->R[i+1][j] = px->R[i][j]+px->dt*(-px->mu[i]*px->R[i][j]+grid_If2RR(*px,i,j));
 			px->f1[i+1][j] = f1(px->C[i+1][j],z);
 			px->f2R[i+1][j] = f2(px->C[i+1][j],z)*px->R[i+1][j];
 
@@ -238,8 +235,8 @@ void initialarray(struct pmct z,struct parr *px){
 		Iv(px,i+1,i);						//
 		Mirroring(px,i+1,i);					//
 
-		px->mu[i+1]=grid_If1R(z,*px,i+1,i+1)+grid_If2RC(z,*px,i+1,i+1)+z.T+z.beta*f1(px->C[i+1][0],z)*px->C[i+1][0]; // Questa e' la prescrizione migliore per mu
-		px->E[i+1]=-z.beta*f(px->C[i+1][0],z)-grid_If1R(z,*px,i+1,i+1);
+		px->mu[i+1]=grid_If1R(*px,i+1,i+1)+grid_If2RC(*px,i+1,i+1)+z.T+z.beta*f1(px->C[i+1][0],z)*px->C[i+1][0]; // Questa e' la prescrizione migliore per mu
+		px->E[i+1]=-z.beta*f(px->C[i+1][0],z)-grid_If1R(*px,i+1,i+1);
 
 		px->C[i+1][i+1]=1;
 		px->R[i][i]=0;
@@ -256,7 +253,7 @@ int step(int i,struct pmct z,struct parr *px,struct psys w){
 
 	// (1) First extrapolation to begin the self-consistence loop
 	px->mu[i] = (D1+1.)*px->mu[i-1]+D2*px->mu[i-2]+D3*px->mu[i-3];
-	Extrapolation(px,i,j);
+	for(j=i;j>0;j--) { Extrapolation(px,i,j); }
 
 	// (2) Go to the SC (self-consistence) loop
 	j=1;
@@ -266,7 +263,7 @@ int step(int i,struct pmct z,struct parr *px,struct psys w){
 	//****** PART ----> j<i-1
 		while(j>=0){
 
-			D = D1*px->dt + px->mu[i] + px->df1v[i][i-1]/z.T;
+			D = D1*px->dt + px->mu[i] + px->df2R[i][i-1];
 
 			err_temp2 = SC2(gC,gR,D,px->mu[i],z,*px,i,j);
 			if (err_temp2>err2) { err2=err_temp2; }
@@ -279,8 +276,14 @@ int step(int i,struct pmct z,struct parr *px,struct psys w){
 
 			Ih(px,i,j);
 			Iv(px,i,j);
-
 			Mirroring(px,i,j);
+			Iv(px,i,j+1);
+			Mirroring(px,i,j+1);
+
+			if(j>=0) {
+				Iv(px,i,j-1);
+				Mirroring(px,i,j-1);
+			}
 
 			j--;
 		}
@@ -439,28 +442,22 @@ void Extrapolation(struct parr *px, int i, int j) {
 /**************************SeLf-CoNsIsTeNcE****************************/
 
 double SC2(double *gC, double *gR, double D, double mu, struct pmct z, struct parr x, int i, int j){
-  int m;
-  double i1C,i2C,i3C,i4C,i1R,i2R,i3R,i4R;
-  m = (int)(0.5*(i+j));
-  i1C = I1C(x,i,j,m);
-  i2C = I2C(x,i,j,m);
-  i3C = I3C(x,i,j);
-  i4C = I4C(x,i,j);
-  i1R = I1R(x,i,j,m);
-  i2R = I2R(x,i,j,m);
-  i3R = i3C;
-  i4R = i4C;
+	//int m = (int)(0.5*(i+j));
+	double if2RC,if2RR,if1R;
 
-  gC[j] = -D3/x.dt*x.C[i-2][j]-D2/x.dt*x.C[i-1][j]+(-i1C+i2C+i3C+i4C)/z.T;
-  gC[j]-= (1./z.T-z.beta)*f1(x.C[i][0],z)*x.C[j][0];
-  gC[j]/= D;
-  gC[j]-= x.C[i][j];
-  gR[j] = -z.T+mu-D3/x.dt*x.R[i-2][j]-D2/x.dt*x.R[i-1][j]+(-i1R-i2R-i3R-i4R)/z.T;
-  gR[j]+= (1./z.T-z.beta)*f1(x.C[i][0],z)*x.C[j][0];
-  gR[j]/= D;
-  gR[j]-= x.R[i][j];
+	if2RC = grid_reduced_If2RC(x,i,j);
+	if2RR = grid_reduced_If2RR(x,i,j);
+	if1R = grid_If1R(x,i,j);
+
+	gC[j] = -D3/x.dt*x.C[i-2][j]-D2/x.dt*x.C[i-1][j]+if2RC+if1R;
+	gC[j]+= z.beta*x.f1[i][0]*x.C[j][0];
+	gC[j]/= D;
+	gC[j]-= x.C[i][j];
+	gR[j] = -D3/x.dt*x.R[i-2][j]-D2/x.dt*x.R[i-1][j]+if2RR;
+	gR[j]/= D;
+	gR[j]-= x.R[i][j];
 	
-  return gC[j]*gC[j]+gR[j]*gR[j];
+	return gC[j]*gC[j]+gR[j]*gR[j];
 }
 
 double If2RR(struct pmct z,struct parr x,int i,int j){
@@ -503,7 +500,7 @@ double If1R(struct pmct z,struct parr x,int i,int j){
 	return I;
 }
 
-double grid_If2RR(struct pmct z,struct parr x,int i,int j){
+double grid_If2RR(struct parr x,int i,int j){
 	double I=0;
 	int k;
 	for(k=j;k<i;k++){
@@ -513,8 +510,17 @@ double grid_If2RR(struct pmct z,struct parr x,int i,int j){
 	return I;
 }
 
+double grid_reduced_If2RR(struct parr x,int i,int j){
+	double I=0;
+	int k;
+	for(k=j;k<i-1;k++){
+		I+=x.df2Rv[i][k]*x.dRv[j][k];
+	}
+	I*=x.dt;
+	return I;
+}
 
-double grid_If2RC(struct pmct z,struct parr x,int i,int j){
+double grid_If2RC(struct parr x,int i,int j){
 	double I=0;
 	int k;
 	for(k=0;k<i;k++){
@@ -524,7 +530,17 @@ double grid_If2RC(struct pmct z,struct parr x,int i,int j){
 	return I;
 }
 
-double grid_If1R(struct pmct z,struct parr x,int i,int j){
+double grid_reduced_If2RC(struct parr x,int i,int j){
+	double I=0;
+	int k;
+	for(k=0;k<i-1;k++){
+		I+=x.df2Rv[i][k]*x.dCv[j][k];
+	}
+	I*=x.dt;
+	return I;
+}
+
+double grid_If1R(struct parr x,int i,int j){
 	double I=0;
 	int k;
 	for(k=0;k<j;k++){
@@ -534,70 +550,7 @@ double grid_If1R(struct pmct z,struct parr x,int i,int j){
 	return I;
 }
 
-double I1C(struct parr x,int i,int j,int m){
-  int l;
-  double sum;
-  sum = 0.0;
-  sum += x.f1[i][m]*x.C[m][j]-x.f1[i][j]*x.C[j][j];
-  for(l=m+1;l<=i-1;l++){
-    sum += x.df1v[i][l-1]*(x.C[l][j]-x.C[l-1][j]);
-  }
-  sum += x.df1v[i][i-1]*(-x.C[i-1][j]);
-  for(l=j+1;l<=m;l++){
-    sum -= (x.f1[i][l]-x.f1[i][l-1])*x.dCh[l][j];
-  }
-  return sum;
-}
-
-double I2C(struct parr x,int i,int j,int m){
-  int l;
-  double sum;
-  sum = 0.0;
-  for(l=m+1;l<=i;l++) sum += x.df2Rv[i][l-1]*(x.R[i][l]-x.R[i][l-1])*(x.C[l][j]+x.C[l-1][j]);
-  for(l=j+1;l<=m;l++) sum += (x.f2R[i][l]+x.f2R[i][l-1])*(x.R[i][l]-x.R[i][l-1])*x.dCh[l][j];
-  return 0.5*sum;
-}
-
-double I3C(struct parr x,int i,int j){
-  int l;
-  double sum;
-  sum = 0.0;
-  sum += x.f1[i][j]*x.R[j][j]-x.f1[i][0]*x.R[j][0];
-  for(l=1;l<=j;l++) sum -= (x.f1[i][l]-x.f1[i][l-1])*x.dRv[j][l-1];
-  return sum;
-}
-
-double I4C(struct parr x,int i,int j){
-  int l;
-  double sum;
-  sum = 0.0;
-  for(l=1;l<=j;l++) sum += (x.f2R[i][l]+x.f2R[i][l-1])*(x.R[i][l]-x.R[i][l-1])*x.dCv[j][l-1];
-  return 0.5*sum;
-}
-
-double I1R(struct parr x,int i,int j,int m){
-  int l;
-  double sum;
-  sum = 0.0;
-  sum += x.f1[i][m]*x.R[m][j]-x.f1[i][j]*x.R[j][j];
-  for(l=m+1;l<=i-1;l++){
-    sum += x.df1v[i][l-1]*(x.R[l][j]-x.R[l-1][j]);
-  }
-  sum += x.df1v[i][i-1]*(-x.R[i-1][j]);
-  for(l=j+1;l<=m;l++){
-    sum -= (x.f1[i][l]-x.f1[i][l-1])*x.dRh[l][j];
-  }
-  return sum;
-}
-
-double I2R(struct parr x,int i,int j,int m){
-  int l;
-  double sum;
-  sum = 0.0;
-  for(l=m+1;l<=i;l++) sum += x.df2Rv[i][l-1]*(x.R[i][l]-x.R[i][l-1])*(2.0-x.R[l][j]-x.R[l-1][j]);
-  for(l=j+1;l<=m;l++) sum += (x.f2R[i][l]+x.f2R[i][l-1])*(x.R[i][l]-x.R[i][l-1])*(1.0-x.dRh[l][j]);
-  return 0.5*sum;
-}
+/**************************GeNeRaLfUnCtIoNs****************************/
 
 double power(double x,int p){
 	double ff=1.;
@@ -621,14 +574,14 @@ double f2(double x, struct pmct z){
 double mu_t(struct pmct z,struct parr x,int i){
 	int l;
 	double mu;
-	mu = z.T + x.dmu;
-	for(l=1;l<=i-z.Nc;l++){
+	mu = z.T + z.beta*x.f1[i][0]*x.C[i][0];
+	for(k=0;k<=i-z.Nc;k++){
 		mu+=(x.R[i][l]-x.R[i][l-1])*(I3*(x.f1[i][l+1]+x.f2R[i][l+1]*x.C[i][l+1])
 			+I2*(x.f1[i][l  ]+x.f2R[i][l  ]*x.C[i][l  ])
 			+I1*(x.f1[i][l-1]+x.f2R[i][l-1]*x.C[i][l-1])
-		)/z.T;
+		}
 	}
-	mu -= (1./z.T-z.beta)*f1(x.C[i][0],z)*x.C[i][0];
+
 	return mu;
 }
 
