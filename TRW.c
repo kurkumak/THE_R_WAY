@@ -1,6 +1,6 @@
-#define thisfile "FP_dyn.c"
+#define thisfile "TRW.c"
 
-//INSTRUCTIONS gcc FP_dyn.c lib/share_memory.c -o FP
+//INSTRUCTIONS gcc TRW.c lib/share_memory.c -o TRW
 /*****************************************************
 p-spin model. Algorithm for chi_4. Similar to the aging (Kim&Latz, 2000)
 written:  08/13/05
@@ -209,17 +209,26 @@ void mct(struct pmct z,struct parr *px,struct psys w){
 void initialarray(struct pmct z,struct parr *px){
 
 	int i,j;
+	double if2RC,if2RR,if1R,bf1C,bfC;
 
 	px->C[0][0]=1;
-	px->R[0][0]=0; 
+	px->R[0][0]=0;
+	px->f1[0][0] = f1(px->C[0][0],z);
+	px->f2R[0][0] = f2(px->C[0][0],z)*px->R[0][0];
+
 	px->mu[0]=z.T+z.beta*f1(1.,z);
 
 	for(i=0;i<z.Nt2;i++){
 
 		for(j=i;j>=0;j--){
 
-			px->C[i+1][j] = px->C[i][j]+px->dt*(-px->mu[i]*px->C[i][j]+grid_If2RC(*px,i,j)+grid_If1R(*px,i,j)+z.beta*f1(px->C[i][0],z)*px->C[j][0]);
-			px->R[i+1][j] = px->R[i][j]+px->dt*(-px->mu[i]*px->R[i][j]+grid_If2RR(*px,i,j));
+			if2RC = If2RC(z,*px,i,j); //grid_If2RC(*px,i,j);
+			if2RR = If2RR(z,*px,i,j); //grid_If2RR(*px,i,j);
+			if1R = If1R(z,*px,i,j); //grid_If1R(*px,i,j);
+			bf1C = z.beta*px->f1[i][0]*px->C[j][0]; //z.beta*f1(px->C[i][0],z)*px->C[j][0]; 
+
+			px->C[i+1][j] = px->C[i][j]+px->dt*(-px->mu[i]*px->C[i][j]+if2RC+if1R+bf1C);
+			px->R[i+1][j] = px->R[i][j]+px->dt*(-px->mu[i]*px->R[i][j]+if2RR);
 			px->f1[i+1][j] = f1(px->C[i+1][j],z);
 			px->f2R[i+1][j] = f2(px->C[i+1][j],z)*px->R[i+1][j];
 
@@ -235,8 +244,13 @@ void initialarray(struct pmct z,struct parr *px){
 		Iv(px,i+1,i);						//
 		Mirroring(px,i+1,i);					//
 
-		px->mu[i+1]=grid_If1R(*px,i+1,i+1)+grid_If2RC(*px,i+1,i+1)+z.T+z.beta*f1(px->C[i+1][0],z)*px->C[i+1][0]; // Questa e' la prescrizione migliore per mu
-		px->E[i+1]=-z.beta*f(px->C[i+1][0],z)-grid_If1R(*px,i+1,i+1);
+		if2RC = If2RC(z,*px,i+1,i+1); //grid_If2RC(*px,i+1,i+1);
+		if1R = If1R(z,*px,i+1,i+1); //grid_If1R(*px,i+1,i+1);
+		bf1C = z.beta*px->f1[i+1][0]*px->C[i+1][0]; //z.beta*f1(px->C[i+1][0],z)*px->C[i+1][0]; 
+		bfC = z.beta*f(px->C[i+1][0],z);
+
+		px->mu[i+1]=if2RC+if1R+z.T+bf1C; // Questa e' la prescrizione migliore per mu
+		px->E[i+1]=-bfC-if1R;
 
 		px->C[i+1][i+1]=1;
 		px->R[i][i]=0;
@@ -256,17 +270,19 @@ int step(int i,struct pmct z,struct parr *px,struct psys w){
 	for(j=i;j>0;j--) { Extrapolation(px,i,j); }
 
 	// (2) Go to the SC (self-consistence) loop
-	j=1;
+	j=i;
 
 	while(err2 >= z.eps*z.eps && scmax < z.rpt){
 
 	//****** PART ----> j<i-1
 		while(j>=0){
 
-			D = D1*px->dt + px->mu[i] + px->df2R[i][i-1];
+			D = D1*px->dt + px->mu[i] + px->df2Rv[i][i-1];
 
 			err_temp2 = SC2(gC,gR,D,px->mu[i],z,*px,i,j);
 			if (err_temp2>err2) { err2=err_temp2; }
+
+ 			printf("%d %d %f %e\r",j,i,px->C[i][j],err_temp2); fflush(stdout); getchar();
 
 			// renew all variable
 			px->C[i][j]+= gC[j]*z.alpha;
@@ -280,7 +296,7 @@ int step(int i,struct pmct z,struct parr *px,struct psys w){
 			Iv(px,i,j+1);
 			Mirroring(px,i,j+1);
 
-			if(j>=0) {
+			if(j>0) {
 				Iv(px,i,j-1);
 				Mirroring(px,i,j-1);
 			}
@@ -290,7 +306,7 @@ int step(int i,struct pmct z,struct parr *px,struct psys w){
 
 		px->mu[i] = mu_t(z,*px,i);
 		scmax++;
-		if(scmax%10==0) { printf("\r%d/%d %d\r",j,i,scmax); fflush(stdout); }
+		if(scmax%10==0) { printf("\r%d %d\r",i,scmax); fflush(stdout); }
 		j=i-z.Nc;
 	}
 
@@ -308,12 +324,12 @@ void contract(struct pmct z,struct parr *x,double *dt,double *dmu){
 	int i,j;
 	double Dl;
 	i=z.Nt;
-	for(j=z.Nt-z.Nc*2+1;j<=z.Nt-z.Nc;j++){
+	/*for(j=z.Nt-z.Nc*2+1;j<=z.Nt-z.Nc;j++){
 		Dl=(x->R[i][j]-x->R[i][j-1])*(I3*(x->f1[i][j+1]+x->f2R[i][j+1]*x->C[i][j+1])
 						+I2*(x->f1[i][j  ]+x->f2R[i][j  ]*x->C[i][j  ])
 						+I1*(x->f1[i][j-1]+x->f2R[i][j-1]*x->C[i][j-1]));
 		(*dmu) += Dl;
-	}
+	}*/
 	for(i=1;i<=z.Nt2;i++){
 		for(j=0;j<=i-1;j++){
 			x->dCh[i][j]= 0.5*(x->dCh[2*i][2*j]+x->dCh[2*i-1][2*j]);
@@ -572,24 +588,21 @@ double f2(double x, struct pmct z){
 }
 
 double mu_t(struct pmct z,struct parr x,int i){
-	int l;
+	int k;
 	double mu;
 	mu = z.T + z.beta*x.f1[i][0]*x.C[i][0];
-	for(k=0;k<=i-z.Nc;k++){
-		mu+=(x.R[i][l]-x.R[i][l-1])*(I3*(x.f1[i][l+1]+x.f2R[i][l+1]*x.C[i][l+1])
-			+I2*(x.f1[i][l  ]+x.f2R[i][l  ]*x.C[i][l  ])
-			+I1*(x.f1[i][l-1]+x.f2R[i][l-1]*x.C[i][l-1])
-		}
+	for(k=0;k<i;k++){
+		mu+=x.df2Rv[i][k]*x.dCv[i][k]+x.f1[i][k]*x.dRv[i][k];
 	}
 
 	return mu;
 }
 
 double E_t(struct pmct z,struct parr x,int i){
-	int l;
+	int k;
 	double E = 0.;
-	for(l=1;l<=i;l++){
-		E += (x.R[i][l]-x.R[i][l-1])*(I3*x.f1[i][l+1]+I2*x.f1[i][l]+I1*x.f1[i][l-1])/z.T;
+	for(k=0;k<i;k++){
+		E -= x.f1[i][k]*x.dRv[i][k];
 	}
 	E -= z.beta*f(x.C[i][0],z);
 	return E;
@@ -649,7 +662,7 @@ void parameters_initialization(struct pmct *pz,struct parr *px, struct psys *pw,
 
 	pz->den  = 1 << 5;			// Nt/Nc
 	pz->Nc = 1 << 2;
-	pz->itr = 0;				// number of cycle.
+	pz->itr = 1;				// number of cycle.
 
 	pz->t0 = 1.0E0;			// Initial time window
 	pz->Cmin = 1.0E-12;			// Minimal value accepted before setting C identically equal to 0.
